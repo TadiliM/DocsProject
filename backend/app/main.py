@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Response, UploadFile
@@ -19,6 +20,9 @@ from app.schemas import (
     DocumentSummary, DocumentUploadResponse, HealthResponse, QuestionRequest,
     QuestionResponse, SearchRequest, SearchResponse,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -206,7 +210,9 @@ def ask_question(
         raise HTTPException(status_code=404, detail="Document not found.") from None
     except (EmbeddingError, ValueError):
         raise HTTPException(status_code=502, detail="Question embedding failed. Try again later.") from None
-    except GenerationError:
+    except GenerationError as error:
+        # GenerationError messages are controlled locally; never log provider bodies.
+        logger.warning("Answer generation failed: %s", error)
         raise HTTPException(status_code=502, detail="Answer generation failed. Check the Groq configuration or try again later.") from None
     except DatabaseError:
         raise HTTPException(status_code=503, detail="Database operation failed. Try again later.") from None

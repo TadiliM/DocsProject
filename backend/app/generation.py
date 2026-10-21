@@ -105,15 +105,17 @@ def generate_answer(
         raise GenerationError("Could not connect to the Groq API.") from None
 
     if response.status_code in (401, 403):
-        raise GenerationError("Groq authentication failed. Check GROQ_API_KEY.")
+        raise GenerationError(f"Groq authentication failed (HTTP {response.status_code}). Check GROQ_API_KEY.")
     if response.status_code == 429:
-        raise GenerationError("Groq rate limit or usage quota reached. Try again later.")
+        raise GenerationError("Groq rate limit or usage quota reached (HTTP 429). Try again later.")
     if not response.is_success:
-        raise GenerationError("Groq could not complete the generation request.")
+        raise GenerationError(f"Groq could not complete the generation request (HTTP {response.status_code}).")
 
     try:
         result = _GroqResponse.model_validate(response.json())
         choice = result.choices[0]
+        if choice.finish_reason == "length":
+            raise GenerationError("Groq reached the completion token limit before finishing the answer.")
         if choice.finish_reason != "stop":
             raise GenerationError("Groq returned an incomplete or refused answer.")
         answer = _GeneratedAnswer.model_validate_json(choice.message.content)

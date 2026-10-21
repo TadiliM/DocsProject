@@ -767,6 +767,22 @@ temporary schema, which was removed afterward; it is not part of the normal suit
 A full question integration test exercises PDF indexing, real pgvector retrieval,
 prompt construction, simulated Groq generation, and returned citations together.
 
+## Continuous integration (CI)
+
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pull requests
+and pushes to `main`. It has two jobs:
+
+1. Run the backend tests using a temporary PostgreSQL database with pgvector.
+2. Install the frontend dependencies and build the React application.
+
+No frontend tests, real Voyage/Groq calls, or project secrets are needed.
+The workflow does not publish Docker images or deploy to the VPS. Deployment
+remains manual using [the deployment guide](deploy/DEPLOYMENT.md): Docker builds
+and runs the application on the VPS. Python and Node are provided by the Docker
+images, so they do not need to be installed separately on the VPS.
+
+The first CI run will happen after this file is pushed to GitHub.
+
 ## Next steps
 
 1. Project owner: publish the changes and deploy using `deploy/DEPLOYMENT.md`.

@@ -63,7 +63,8 @@ services:
       start_period: 15s
       retries: 3
     read_only: true
-    tmpfs: [/tmp:size=64m,noexec,nosuid]
+    tmpfs:
+      - "/tmp:size=64m,noexec,nosuid"
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 512m
@@ -76,7 +77,8 @@ services:
       proxy:
         aliases: [docsproject-web]
     read_only: true
-    tmpfs: [/tmp:size=16m,noexec,nosuid]
+    tmpfs:
+      - "/tmp:size=16m,noexec,nosuid"
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 128m

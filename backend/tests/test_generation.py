@@ -115,6 +115,7 @@ def test_provider_errors_hide_details_and_do_not_retry(fake_groq, status):
     with pytest.raises(GenerationError) as error:
         generate_answer("Question?", sources(), settings())
     assert len(calls) == 1
+    assert f"HTTP {status}" in str(error.value)
     assert "test-groq-secret" not in str(error.value)
     assert "private text" not in str(error.value)
 
