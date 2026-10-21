@@ -1,3 +1,6 @@
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -13,7 +16,15 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
     page_number INTEGER NOT NULL CHECK (page_number > 0),
     text TEXT NOT NULL CHECK (length(trim(text)) > 0),
-    -- The embedding model and its dimensions will be selected in step 8.
-    embedding VECTOR,
+    -- voyage-4-lite uses 1024-dimensional float embeddings in this project.
+    embedding VECTOR(1024),
     UNIQUE (document_id, chunk_index)
 );
+
+-- Also update databases initialized before the embedding size was fixed.
+-- Incompatible existing vectors abort the transaction without losing data.
+ALTER TABLE chunks
+    ALTER COLUMN embedding TYPE VECTOR(1024)
+    USING embedding::VECTOR(1024);
+
+COMMIT;

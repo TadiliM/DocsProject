@@ -6,6 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EMBEDDING_MODEL = "voyage-4-lite"
+EMBEDDING_DIMENSIONS = 1024
+LLM_MODEL = "qwen/qwen3.8-27b"
 
 
 class Settings(BaseSettings):
@@ -24,6 +27,16 @@ class Settings(BaseSettings):
     postgres_db: str = "docsproject"
     postgres_user: str = "docsproject"
     postgres_password: SecretStr = SecretStr("docsproject_local_only")
+    voyage_api_key: SecretStr = SecretStr("")
+    voyage_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    voyage_batch_size: int = Field(default=16, ge=1, le=16)
+    groq_api_key: SecretStr = SecretStr("")
+    groq_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    llm_max_completion_tokens: int = Field(default=512, ge=64, le=2048)
+    llm_max_context_chars: int = Field(default=6000, ge=500, le=12000)
+    rate_limit_requests: int = Field(default=3, ge=1, le=100)
+    rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
+    admin_api_key: SecretStr = SecretStr("")
 
     @model_validator(mode="after")
     def validate_chunk_overlap(self) -> "Settings":

@@ -1,6 +1,8 @@
 import pytest
+import psycopg
 
 from app.config import Settings, get_settings
+from app.embeddings import EmbeddingError
 from app.main import app
 
 
@@ -13,8 +15,12 @@ def upload(client, content, filename="document.pdf", content_type="application/p
 def test_extracts_text_and_preserves_blank_page_numbers(client, make_pdf):
     response = upload(client, make_pdf(["First page.", "", "Third page."]))
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json() == {
+        "id": 123,
+        "created_at": "2026-01-01T00:00:00Z",
+        "embedding_model": "voyage-4-lite",
+        "embedding_tokens": 20,
         "filename": "document.pdf",
         "page_count": 3,
         "pages": [
@@ -34,7 +40,7 @@ def test_accepts_uppercase_extension_and_generic_mime_type(client, make_pdf):
     response = upload(
         client, make_pdf(["Readable text."]), "DOCUMENT.PDF", "application/octet-stream"
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
 
 
 def test_upload_uses_configured_chunk_size_and_overlap(client, make_pdf):
@@ -42,7 +48,7 @@ def test_upload_uses_configured_chunk_size_and_overlap(client, make_pdf):
         _env_file=None, chunk_size=10, chunk_overlap=3
     )
     response = upload(client, make_pdf(["abcdefghijklmnopq"]))
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()
     assert data["chunk_count"] == 2
     assert data["chunks"] == [
@@ -103,3 +109,42 @@ def test_health_and_api_schema(client):
     assert client.get("/docs").status_code == 200
     schema = client.get("/openapi.json").json()
     assert "multipart/form-data" in schema["paths"]["/documents"]["post"]["requestBody"]["content"]
+
+
+def test_indexes_chunks_with_their_matching_vectors(client, make_pdf, upload_mocks):
+    response = upload(client, make_pdf(["First page.", "Second page."]))
+    assert response.status_code == 201
+    assert upload_mocks["embed_documents"].call_args.args[0] == ["First page.", "Second page."]
+    arguments = upload_mocks["create_document"].call_args.args
+    assert [chunk.text for chunk in arguments[3]] == ["First page.", "Second page."]
+    assert len(arguments[4]) == 2
+    assert all(len(vector) == 1024 for vector in arguments[4])
+
+
+def test_embedding_failure_does_not_save_document(client, make_pdf, upload_mocks):
+    upload_mocks["embed_documents"].side_effect = EmbeddingError("Private provider details.")
+    response = upload(client, make_pdf(["Text."]))
+    assert response.status_code == 502
+    assert "Private" not in response.text
+    upload_mocks["create_document"].assert_not_called()
+    upload_mocks["get_connection"].assert_not_called()
+
+
+@pytest.mark.parametrize("failure", [False, psycopg.OperationalError("Private database details.")])
+def test_unavailable_database_avoids_spending_tokens(client, make_pdf, upload_mocks, failure):
+    if failure is False:
+        upload_mocks["check_database"].return_value = False
+    else:
+        upload_mocks["check_database"].side_effect = failure
+    response = upload(client, make_pdf(["Text."]))
+    assert response.status_code == 503
+    assert "Private" not in response.text
+    upload_mocks["embed_documents"].assert_not_called()
+    upload_mocks["create_document"].assert_not_called()
+
+
+def test_save_failure_returns_generic_error(client, make_pdf, upload_mocks):
+    upload_mocks["create_document"].side_effect = psycopg.OperationalError("Private details.")
+    response = upload(client, make_pdf(["Text."]))
+    assert response.status_code == 503
+    assert "Private" not in response.text
