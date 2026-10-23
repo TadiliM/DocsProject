@@ -74,7 +74,7 @@ selects the route; Pydantic defines and validates data structures.
 
 ## Run the React frontend locally
 
-Use Node 22.12 or newer. Keep the backend running on port 8000, then in a separate
+Use Node 24.22.1 (see `frontend/.nvmrc`). Keep the backend running on port 8000, then in a separate
 terminal:
 
 ```bash
@@ -346,7 +346,19 @@ provider and database errors are not returned. The only model call is to Voyage.
 The generation model is fixed to `qwen/qwen3.8-27b` in `config.py`. The client calls
 Groq's chat completions endpoint directly through HTTPX. No SDK, local model, or
 new database migration is needed. Qwen's reasoning mode is disabled for concise
-answers. The request uses strict JSON-schema output, followed by local validation.
+answers. The request uses JSON object mode. Pydantic validates the response schema
+locally, and the backend checks that every citation references a retrieved passage.
+If the model supplies valid source IDs but no inline markers, the backend appends
+their numeric markers to the answer. Conflicting or invented source IDs remain
+errors; source names and page numbers always come from the database.
+If local schema or citation validation fails, the backend asks Groq for one
+corrected response using the same passages and the validation reason. A second
+invalid answer is rejected. Authentication, quota, network, and other provider
+errors are not retried. A question therefore uses at most two Groq requests and
+only one Voyage embedding request.
+This avoids the `json_validate_failed` errors observed with strict JSON-schema
+generation on the deployed Qwen model. Provider errors are logged without keys,
+document content, or raw provider responses.
 See [Groq structured outputs](https://console.groq.com/docs/structured-outputs)
 and [reasoning controls](https://console.groq.com/docs/reasoning).
 

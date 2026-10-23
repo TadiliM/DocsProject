@@ -53,7 +53,7 @@ def test_groq_request_and_grounded_answer(fake_groq):
         assert body["model"] == "qwen/qwen3.8-27b"
         assert body["reasoning_effort"] == "none"
         assert body["max_completion_tokens"] == 512
-        assert body["response_format"]["json_schema"]["strict"] is True
+        assert body["response_format"] == {"type": "json_object"}
         assert "untrusted data" in body["messages"][0]["content"]
         context = json.loads(body["messages"][1]["content"])
         assert context == {
@@ -89,18 +89,64 @@ def test_missing_key_never_calls_groq(fake_groq):
     {"answer": "An invented fact. [99]", "answerable": True, "source_ids": [99]},
     {"answer": "An uncited fact.", "answerable": True, "source_ids": []},
     {"answer": "A fact. [1]", "answerable": True, "source_ids": []},
-    {"answer": "A fact.", "answerable": True, "source_ids": [1]},
     {"answer": "A fact. [1]", "answerable": True, "source_ids": [1, 1]},
     {"answer": "Not enough evidence. [1]", "answerable": False, "source_ids": [1]},
     {"answer": " ", "answerable": True, "source_ids": [1]},
     {"answer": "A fact. [1]", "answerable": True, "source_ids": [True]},
     {"answer": "A fact. [1]", "answerable": "true", "source_ids": [1]},
     {"answer": "A fact. [1]", "answerable": True, "source_ids": [1], "page_number": 999},
+    {"answer": "A fact. [1, 99]", "answerable": True, "source_ids": [1]},
 ])
 def test_rejects_unusable_answers_and_invented_citations(fake_groq, answer):
     fake_groq(lambda request: httpx.Response(200, json=payload(answer)))
     with pytest.raises(GenerationError):
         generate_answer("Question?", sources(), settings())
+
+
+def test_completes_missing_inline_markers_from_valid_source_ids(fake_groq):
+    fake_groq(lambda request: httpx.Response(200, json=payload({
+        "answer": "The internship lasts six months.", "answerable": True, "source_ids": [1],
+    })))
+    result = generate_answer("How long is the internship?", sources(), settings())
+    assert result.answer == "The internship lasts six months. [1]"
+    assert result.source_ids == [1]
+
+
+def test_requests_one_correction_after_an_answer_without_sources(fake_groq):
+    calls = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if len(calls) == 1:
+            return httpx.Response(200, json=payload({
+                "answer": "The internship lasts six months.",
+                "answerable": True, "source_ids": [],
+            }))
+        assert "previous attempt failed validation" in body["messages"][0]["content"]
+        assert body["messages"][1] == calls[0]["messages"][1]
+        return httpx.Response(200, json=payload())
+
+    fake_groq(handler)
+    result = generate_answer("How long is the internship?", sources(), settings())
+    assert len(calls) == 2
+    assert result.source_ids == [1]
+    assert result.answer == "The internship lasts six months. [1]"
+
+
+def test_repeated_invalid_citations_stop_after_one_correction(fake_groq):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json=payload({
+            "answer": "An invented fact. [99]", "answerable": True, "source_ids": [99],
+        }))
+
+    fake_groq(handler)
+    with pytest.raises(GenerationError, match="inconsistent source citations"):
+        generate_answer("Question?", sources(), settings())
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 429, 500, 503])
@@ -128,6 +174,19 @@ def test_network_errors(fake_groq, error_type):
     fake_groq(handler)
     with pytest.raises(GenerationError):
         generate_answer("Question?", sources(), settings())
+
+
+def test_json_generation_failure_is_identifiable_without_exposing_provider_body(fake_groq):
+    fake_groq(lambda request: httpx.Response(400, json={"error": {
+        "code": "json_validate_failed",
+        "message": "test-groq-secret private text",
+        "failed_generation": "Private document content.",
+    }}))
+    with pytest.raises(GenerationError, match="json_validate_failed") as error:
+        generate_answer("Question?", sources(), settings())
+    assert "test-groq-secret" not in str(error.value)
+    assert "private text" not in str(error.value)
+    assert "Private document content" not in str(error.value)
 
 
 @pytest.mark.parametrize("kind", ["invalid_json", "invalid_content", "truncated", "no_choices", "missing_usage"])
